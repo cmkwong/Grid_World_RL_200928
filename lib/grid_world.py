@@ -1,5 +1,25 @@
 import numpy as np
 
+action_labels = ['u','r','d','l']
+
+def print_value_grid(value_table):
+    for i in range(value_table.shape[0]):
+        rows = ''
+        for j in range(value_table.shape[1]):
+            rows = rows + str(round(value_table[i,j], 2)) + '   '
+        print(rows)
+
+def roundList(element, precious=2):
+    return round(element, precious)
+
+def print_policy_grid(policy_table):
+    for i in range(policy_table.shape[0]):
+        rows = ''
+        for j in range(policy_table.shape[1]):
+            rounded_list = list(map(roundList, policy_table[i,j]))
+            rows = rows + str(rounded_list) + ' '
+        print(rows)
+
 class GridWorld:
     def __init__(self, grid_shape, step_cost, discount, start):
         self.rows = grid_shape[0] # 4
@@ -50,25 +70,10 @@ class GridWorld:
         return target_i, target_j
 
 class Agent:
-    def __init__(self, grid_shape, discount=0.9, lr=0.1):
+    def __init__(self, grid_shape, lr=0.1):
         self.lr = lr
         self.policy = np.zeros((grid_shape[0],grid_shape[1]), dtype=list)
-        self.discount = discount
         self.init_policy()
-
-    def init_policy_2(self, action_table):
-        """
-        According to the action table, init the policy
-        return: policy
-        """
-        policy = np.zeros((action_table.shape), dtype=list)
-        for i in range(policy.shape[0]):
-            for j in range(policy.shape[1]):
-                policy[i, j] = []
-                total = len(action_table[i,j])
-                for t in range(total):
-                    policy[i,j].append(1/total)
-        return policy
 
     def init_policy(self):
         """
@@ -84,28 +89,9 @@ class Agent:
         :params: curr_i, curr_j
         return str=action
         """
-        action_labels = ['u','r','d','l']
         prob_dist = self.policy[position[0], position[1]]
         action_index = list(np.random.multinomial(1, prob_dist, size=1).reshape(-1,)).index(1)
         return action_labels[action_index]
-
-def print_value_grid(value_table):
-    for i in range(value_table.shape[0]):
-        rows = ''
-        for j in range(value_table.shape[1]):
-            rows = rows + str(round(value_table[i,j], 4)) + '   '
-        print(rows)
-
-def roundList(element, precious=2):
-    return round(element, precious)
-
-def print_policy_grid(policy_table):
-    for i in range(policy_table.shape[0]):
-        rows = ''
-        for j in range(policy_table.shape[1]):
-            rounded_list = list(map(roundList, policy_table[i,j]))
-            rows = rows + str(rounded_list) + ' '
-        print(rows)
 
 class Game_Starter:
     def __init__(self, env, agent, target_reward, print_every, playGame, clean_history=True):
@@ -145,15 +131,12 @@ class Game_Starter:
                     value_state = 0
                     for ii, action_prob in enumerate(self.agent.policy[i,j]):
                         t_i, t_j = self.env.get_pos(i,j,actions_label[ii])
-                        value_state += action_prob * (self.env.reward_table[t_i,t_j] + self.env.discount * self.env.value_table[t_i,t_j])
+                        # deterministic so the probability is always 1: https://www.udemy.com/course/artificial-intelligence-reinforcement-learning-in-python/learn/lecture/6417712?start=452#notes
+                        value_state += action_prob * (1) * (self.env.reward_table[t_i,t_j] + self.env.discount * self.env.value_table[t_i,t_j])
                     self.env.value_table[i,j] = value_state
 
     def update_policy(self):
-        """
-
-        """
         max_i, max_j = self.agent.policy.shape[0], self.agent.policy.shape[1]
-        action_labels = ['u','r','d','l']
         for i in range(max_i):
             for j in range(max_j):
                 state_values = []
@@ -179,7 +162,7 @@ class Game_Starter:
             if self.playGame:
                 step, reward, goal = self.play(pos)
             else:
-                step, reward, goal = 0.0,0.0,0.0
+                step, reward, goal = 0.0, 0.0, False
             total_reward += reward
             steps.append(step)
             if goal:
@@ -198,12 +181,24 @@ class Game_Starter:
                 mean_steps = float(np.mean(steps[-self.print_every:]))
                 completed_goal = (goal_count / play_count) * 100
                 reward_per_play = total_reward / play_count
-                print("%d plays - mean step: %.2f; completed goal: %.2f; reward per play: %.2f" %
+                print("%d plays - mean step: %.2f; completed goal: %.2f%%; reward per play: %.2f" %
                       (play_count, mean_steps, completed_goal, reward_per_play))
 
                 if self.clean_history:
                     steps = []
 
+            if total_reward > self.target_reward:
+                print("")
+                print("-------------------------Goal Reached---------------------------")
+                print("----------------------------------------------------------------")
+                print_value_grid(self.env.value_table)
+                print_policy_grid(self.agent.policy)
+                mean_steps = float(np.mean(steps[-self.print_every:]))
+                completed_goal = (goal_count / play_count) * 100
+                reward_per_play = total_reward / play_count
+                print("%d plays - mean step: %.2f; completed goal: %.2f%%; reward per play: %.2f" %
+                      (play_count, mean_steps, completed_goal, reward_per_play))
+                break
 
 
 
