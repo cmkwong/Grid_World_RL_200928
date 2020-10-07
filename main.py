@@ -7,4 +7,5 @@ agent = grid_world.Agent(grid_shape=GRID_SHAPE, lr=0.1)
 game_starter = grid_world.Game_Starter(env, agent, target_reward=2000, print_every=10, playGame=True, clean_history=True)
 
 # play the game
-game_starter.start()
+# game_starter.start()
+game_starter.start_mc(sampling_times=100)

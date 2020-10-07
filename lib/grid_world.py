@@ -94,13 +94,14 @@ class Agent:
         return action_labels[action_index]
 
 class Game_Starter:
-    def __init__(self, env, agent, target_reward, print_every, playGame, clean_history=True):
+    def __init__(self, env, agent, target_reward, print_every, playGame, monte_carlo=False, clean_history=True):
         self.env = env
         self.agent = agent
         self.target_reward = target_reward
         self.print_every = print_every
         self.playGame = playGame
         self.clean_history = clean_history
+        self.monte_carlo = monte_carlo
 
 
     def play(self, pos):
@@ -114,7 +115,7 @@ class Game_Starter:
             step += 1
             reward += self.env.reward_table[i, j]
 
-            # finish the game when reach the final point
+            # check if finish the game when reach the final point
             if i == 2 and j == 3:
                 break
             elif i == 3 and j ==3:
@@ -122,6 +123,35 @@ class Game_Starter:
                 break
 
         return step, reward, goal
+
+    def sampling(self, pos, sampling_times):
+
+        samples = []
+        for _ in range(sampling_times):
+            i, j = pos[0], pos[1]
+            states_and_rewards = [[(i,j),0]]
+            while True:
+                action = self.agent.get_action([i,j])
+                i, j = self.env.get_pos(i, j, action)
+
+                # record the experience
+                states_and_rewards.append([(i,j), self.env.reward_table[i, j]])
+
+                # check if finish the game anc calculate the returns
+                if (i == 2 and j == 3) or (i == 3 and j ==3):
+                    states_and_returns = []
+                    G = 0
+                    # calculate the return from rewards
+                    for s, r in reversed(states_and_rewards):
+                        states_and_returns.append([(s[0], s[1]), G])
+                        G = r + self.env.discount * G
+                    states_and_returns.reverse()
+                    break
+
+            # append the samples
+            samples.append(states_and_returns)
+
+        return samples
 
     def update_state_value(self):
         actions_label = ['u', 'r', 'd', 'l']
@@ -135,6 +165,23 @@ class Game_Starter:
                         value_state += action_prob * (1) * (self.env.reward_table[t_i,t_j] + self.env.discount * self.env.value_table[t_i,t_j])
                     self.env.value_table[i,j] = value_state
 
+    def update_state_value_mc(self, experience_samples):
+        """
+        :params: experience_samples = [[ [s1, G1], [s2, G2], ...] ...]
+        """
+        all_returns = np.zeros((self.env.rows, self.env.cols), dtype=float)
+        all_counts = np.zeros((self.env.rows, self.env.cols), dtype=int)
+        updated_states = set()
+        for e in range(len(experience_samples)):
+            for s, G in experience_samples[e]:
+                all_counts[s[0], s[1]] += 1
+                all_returns[s[0], s[1]] = ((all_counts[s[0], s[1]] - 1) * all_returns[(s[0], s[1])] + G) * (1 / all_counts[s[0], s[1]])
+                updated_states.add(s)
+
+        # update the new value of state
+        for s in updated_states:
+            self.env.value_table[s[0], s[1]] = all_returns[s[0], s[1]]
+
     def update_policy(self):
         max_i, max_j = self.agent.policy.shape[0], self.agent.policy.shape[1]
         for i in range(max_i):
@@ -142,8 +189,6 @@ class Game_Starter:
                 state_values = []
                 for action_label in action_labels:
                     t_i, t_j = self.env.get_pos(i,j, action_label)
-                    # if t_i == 2 and t_j == 3:
-                    #     print("")
                     state_values.append(self.env.reward_table[t_i,t_j] + self.env.discount * self.env.value_table[t_i,t_j])
                 argmax_actions = list(np.argwhere(state_values == np.max(state_values)).reshape(-1,))
                 # update the policy
@@ -200,5 +245,56 @@ class Game_Starter:
                       (play_count, mean_steps, completed_goal, reward_per_play))
                 break
 
+    def start_mc(self, sampling_times=100):
+        pos = [self.env.i, self.env.j]
+        steps = []
+        goal_count = 0
+        total_reward = 0
+        play_count = 0
+        while True:
+            # play the game
+            if self.playGame:
+                step, reward, goal = self.play(pos)
+            else:
+                step, reward, goal = 0.0, 0.0, False
+            total_reward += reward
+            steps.append(step)
+            if goal:
+                goal_count += 1
+            play_count += 1
+
+            # sampling
+            experience_samples = self.sampling(pos=[0,0],sampling_times=sampling_times)
+
+            # cal the value of state
+            self.update_state_value_mc(experience_samples=experience_samples)
+            # update the policy according to the updated value of state
+            self.update_policy()
+
+            # print every required steps
+            if play_count % self.print_every == 0:
+                print_value_grid(self.env.value_table)
+                print_policy_grid(self.agent.policy)
+                mean_steps = float(np.mean(steps[-self.print_every:]))
+                completed_goal = (goal_count / play_count) * 100
+                reward_per_play = total_reward / play_count
+                print("%d plays - mean step: %.2f; completed goal: %.2f%%; reward per play: %.2f" %
+                      (play_count, mean_steps, completed_goal, reward_per_play))
+
+                if self.clean_history:
+                    steps = []
+
+            if total_reward > self.target_reward:
+                print("")
+                print("-------------------------Goal Reached---------------------------")
+                print("----------------------------------------------------------------")
+                print_value_grid(self.env.value_table)
+                print_policy_grid(self.agent.policy)
+                mean_steps = float(np.mean(steps[-self.print_every:]))
+                completed_goal = (goal_count / play_count) * 100
+                reward_per_play = total_reward / play_count
+                print("%d plays - mean step: %.2f; completed goal: %.2f%%; reward per play: %.2f" %
+                      (play_count, mean_steps, completed_goal, reward_per_play))
+                break
 
 
