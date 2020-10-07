@@ -190,13 +190,13 @@ class Game_Starter:
                 for action_label in action_labels:
                     t_i, t_j = self.env.get_pos(i,j, action_label)
                     state_values.append(self.env.reward_table[t_i,t_j] + self.env.discount * self.env.value_table[t_i,t_j])
-                argmax_actions = list(np.argwhere(state_values == np.max(state_values)).reshape(-1,))
+                argmax_actions = list(np.argwhere(state_values == np.max(state_values)).reshape(-1,)) # there maybe more than one max value
                 # update the policy
                 for argmax_action in argmax_actions:
                     self.agent.policy[i,j][argmax_action] += (self.agent.lr) / len(argmax_actions)
                 self.agent.policy[i,j] = list(self.agent.policy[i,j] / np.sum(self.agent.policy[i,j]))
 
-    def start(self):
+    def start(self, MC_mode=False, sampling_times=100):
         pos = [self.env.i, self.env.j]
         steps = []
         goal_count = 0
@@ -214,8 +214,15 @@ class Game_Starter:
                 goal_count += 1
             play_count += 1
 
-            # cal the value of state
-            self.update_state_value()
+            if MC_mode:
+                # sampling
+                experience_samples = self.sampling(pos=[0, 0], sampling_times=sampling_times)
+                # cal the value of state
+                self.update_state_value_mc(experience_samples=experience_samples)
+            else:
+                # cal the value of state
+                self.update_state_value()
+
             # update the policy according to the updated value of state
             self.update_policy()
 
