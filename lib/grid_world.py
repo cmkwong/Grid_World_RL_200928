@@ -110,7 +110,6 @@ class Agent:
         action_index = list(np.random.multinomial(1, prob_dist, size=1).reshape(-1, )).index(1)  # select the action based on distribution
         return ACTION_LABELS[action_index]
 
-
 class Game_Starter:
     def __init__(self, env, agent, target_reward, print_every, clean_history=True):
         self.env = env
@@ -187,8 +186,8 @@ class Game_Starter:
                     G = 0
                     # calculate the return from rewards
                     for s, a, r in reversed(states_actions_and_rewards):
-                        states_actions_and_returns.append([s, a, G])
                         G = r + self.env.discount * G
+                        states_actions_and_returns.append([s, a, G])
                     states_actions_and_returns.reverse()
                     break
 
