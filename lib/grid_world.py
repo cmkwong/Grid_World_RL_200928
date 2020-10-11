@@ -284,7 +284,7 @@ class Game_Starter:
                     self.agent.policy[i, j][index] += (self.agent.lr) / len(argmax_actions)
                 self.agent.policy[i, j] = list(self.agent.policy[i, j] / np.sum(self.agent.policy[i, j]))
 
-    def start(self, play_game=True, state_mode='V', agent_mode='DP', sampling_times=100): # state_mode = V, Q ; agent_mode = DP, MC, TD
+    def start(self, play_game=True, state_mode='V', agent_mode='DP', sampling_times=10, policy_update_times=10): # state_mode = V, Q ; agent_mode = DP, MC, TD
         pos = [self.env.i, self.env.j]
         steps = []
         goal_count = 0
@@ -309,10 +309,11 @@ class Game_Starter:
                     # cal the value of state
                     self.update_state_value_with_exp(experience_samples=experience_samples)
                 elif state_mode == 'Q':
-                    # sampling_Q
-                    experience_samples = self.sampling_Q(pos=[0, 0], sampling_times=sampling_times)
-                    # cal the action-value of state
-                    self.update_state_action_value_with_exp(experience_samples=experience_samples)
+                    for _ in range(policy_update_times):
+                        # sampling_Q
+                        experience_samples = self.sampling_Q(pos=[0, 0], sampling_times=sampling_times)
+                        # cal the action-value of state
+                        self.update_state_action_value_with_exp(experience_samples=experience_samples)
             elif agent_mode == "DP":
                 if state_mode == 'V':
                     # cal the value of state
