@@ -7,4 +7,4 @@ agent = grid_world.Agent(grid_shape=GRID_SHAPE, lr=0.1)
 game_starter = grid_world.Game_Starter(env, agent, target_reward=400, print_every=10, clean_history=True)
 
 # play the game
-game_starter.start(play_game=True, state_mode='Q', agent_mode="DP", sampling_times=1000, policy_update_times = 1) # state_mode = Q, V ; agent_mode = DP, MC, TD
+game_starter.start(play_game=True, state_mode='V', agent_mode="TD0", sampling_times=1000, policy_update_times = 1) # state_mode = Q, V ; agent_mode = DP, MC, TD0

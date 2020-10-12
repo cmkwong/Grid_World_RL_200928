@@ -140,7 +140,7 @@ class Game_Starter:
 
     def sampling_V(self, pos, sampling_times):
 
-        samples = []
+        samples = {"reward": [], "return": []}
         for _ in range(sampling_times):
             c_i, c_j = pos[0], pos[1]
             states_and_rewards = [[(c_i, c_j), 0]]
@@ -165,12 +165,13 @@ class Game_Starter:
                 c_i, c_j = t_i, t_j
 
             # append the samples
-            samples.append(states_and_returns)
+            samples["reward"].append(states_and_rewards)
+            samples["return"].append(states_and_returns)
 
         return samples
 
     def sampling_Q(self, pos, sampling_times):
-        samples = []
+        samples = {"reward": [], "return": []}
         for _ in range(sampling_times):
             c_i, c_j = pos[0], pos[1]
             states_actions_and_rewards = []
@@ -194,7 +195,8 @@ class Game_Starter:
                 c_i, c_j = t_i, t_j
 
             # append the samples
-            samples.append(states_actions_and_returns)
+            samples["reward"].append(states_actions_and_rewards)
+            samples["return"].append(states_actions_and_returns)
 
         return samples
 
@@ -220,47 +222,64 @@ class Game_Starter:
                             G += self.env.discount * action_prob * self.env.action_value_table[t_i, t_j][a_secondary]
                         self.env.action_value_table[i,j][a_primary] = G
 
-    def update_state_value_with_exp(self, experience_samples):
+    def update_state_value_with_exp(self, experience_samples, mode="MC"): # mode = "MC" / "TD0"
         """
-        :params: experience_samples = [[ [s1, G1], [s2, G2], ...] ...]
+        :params: experience_samples = [samples_reward, samples_return]
+                        returns = [[ [s1, r1], [s2, r2], ...] ...]
+                        rewards = [[ [s1, G1], [s2, G2], ...] ...]
         """
-        all_returns = np.zeros((self.env.rows, self.env.cols), dtype=float)
-        all_counts = np.zeros((self.env.rows, self.env.cols), dtype=int)
-        updated_states = set()
-        for exp in range(len(experience_samples)):
-            for s, G in experience_samples[exp]:
-                all_counts[s[0], s[1]] += 1
-                all_returns[s[0], s[1]] = ((all_counts[s[0], s[1]] - 1) * all_returns[(s[0], s[1])] + G) * (1 / all_counts[s[0], s[1]])
-                updated_states.add(s)
+        if mode == "MC":
+            state_and_return = experience_samples["return"]
+            all_returns = np.zeros((self.env.rows, self.env.cols), dtype=float)
+            all_counts = np.zeros((self.env.rows, self.env.cols), dtype=int)
+            updated_states = set()
+            for exp in range(len(state_and_return)):
+                for s, G in state_and_return[exp]:
+                    all_counts[s[0], s[1]] += 1
+                    all_returns[s[0], s[1]] = ((all_counts[s[0], s[1]] - 1) * all_returns[(s[0], s[1])] + G) * (1 / all_counts[s[0], s[1]])
+                    updated_states.add(s)
 
-        # update the new value of state
-        for s in updated_states:
-            self.env.value_table[s[0], s[1]] = all_returns[s[0], s[1]]
+            # update the new value of state
+            for s in updated_states:
+                self.env.value_table[s[0], s[1]] = all_returns[s[0], s[1]]
 
-    def update_state_action_value_with_exp(self, experience_samples):
+        elif mode == "TD0":
+            state_and_reward = experience_samples["reward"]
+            for exp in state_and_reward:
+                for t in range(len(exp) - 1):
+                    s, _ = exp[t]
+                    s2, r = exp[t+1]
+                    self.env.value_table[s] = self.env.value_table[s] + self.agent.lr * (r + self.env.discount * self.env.value_table[s2] - self.env.value_table[s])
+
+
+    def update_state_action_value_with_exp(self, experience_samples, mode="MC"): # mode = "MC" / "TD0"
         """
-        :params: experience_samples = [[ [s1, a1, G1], [s2, a2, G2], ...] ...] where a = action character
+        :params: experience_samples = [samples_reward, samples_return]
+                        samples_reward = [[ [s1, a1, r1], [s2, a2, r2], ...] ...]
+                        samples_return = [[ [s1, a1, G1], [s2, a2, G2], ...] ...] where a = action character
         """
+        if mode == "MC":
+            state_and_return = experience_samples["return"]
+            all_returns = np.zeros((self.env.rows, self.env.cols), dtype=object)
+            all_counts = np.zeros((self.env.rows, self.env.cols), dtype=object)
+            for i in range(self.env.rows):
+                for j in range(self.env.cols):
+                    all_returns[i,j] = [0] * 4
+                    all_counts[i,j] = [0] * 4
+            updated_state_actions = set()
 
-        # init
-        all_returns = np.zeros((self.env.rows, self.env.cols), dtype=object)
-        all_counts = np.zeros((self.env.rows, self.env.cols), dtype=object)
-        for i in range(self.env.rows):
-            for j in range(self.env.cols):
-                all_returns[i,j] = [0] * 4
-                all_counts[i,j] = [0] * 4
-        updated_state_actions = set()
+            for exp in state_and_return:
+                for s, action, G in exp:
+                    a = ACTION_LABELS.index(action)
+                    all_counts[s[0], s[1]][a] += 1
+                    all_returns[s[0], s[1]][a] = ((all_counts[s[0], s[1]][a] - 1) * all_returns[(s[0], s[1])][a] + G) * (1 / all_counts[s[0], s[1]][a])
+                    updated_state_actions.add((s,a))
 
-        for exp in experience_samples:
-            for s, action, G in exp:
-                a = ACTION_LABELS.index(action)
-                all_counts[s[0], s[1]][a] += 1
-                all_returns[s[0], s[1]][a] = ((all_counts[s[0], s[1]][a] - 1) * all_returns[(s[0], s[1])][a] + G) * (1 / all_counts[s[0], s[1]][a])
-                updated_state_actions.add((s,a))
+            for s, a in updated_state_actions:
+                self.env.action_value_table[s[0], s[1]][a] = all_returns[s[0], s[1]][a]
 
-        for s, a in updated_state_actions:
-            self.env.action_value_table[s[0], s[1]][a] = all_returns[s[0], s[1]][a]
-
+        elif mode == "TD0":
+            pass
 
     def update_policy(self, by='V'): # by='V' / 'Q'
         max_i, max_j = self.agent.policy.shape[0], self.agent.policy.shape[1]
@@ -273,6 +292,7 @@ class Game_Starter:
                     for action_label in ACTION_LABELS:
                         t_i, t_j = self.env.get_pos(i, j, action_label)
                         state_values.append(self.env.reward_table[t_i, t_j] + self.env.discount * self.env.value_table[t_i, t_j])
+                    state_values = list(map(roundList, state_values))
                     argmax_actions = list(np.argwhere(state_values == np.max(state_values)).reshape(-1, ))  # there maybe more than one max value
 
                 elif by == 'Q':
@@ -284,7 +304,7 @@ class Game_Starter:
                     self.agent.policy[i, j][index] += (self.agent.lr) / len(argmax_actions)
                 self.agent.policy[i, j] = list(self.agent.policy[i, j] / np.sum(self.agent.policy[i, j]))
 
-    def start(self, play_game=True, state_mode='V', agent_mode='DP', sampling_times=10, policy_update_times=10): # state_mode = V, Q ; agent_mode = DP, MC, TD
+    def start(self, play_game=True, state_mode='V', agent_mode='DP', sampling_times=10, policy_update_times=10): # state_mode = V, Q ; agent_mode = DP, MC, TD0
         pos = [self.env.i, self.env.j]
         steps = []
         goal_count = 0
@@ -307,13 +327,26 @@ class Game_Starter:
                     # sampling_V
                     experience_samples = self.sampling_V(pos=[0, 0], sampling_times=sampling_times)
                     # cal the value of state
-                    self.update_state_value_with_exp(experience_samples=experience_samples)
+                    self.update_state_value_with_exp(experience_samples=experience_samples, mode="MC")
                 elif state_mode == 'Q':
                     for _ in range(policy_update_times):
                         # sampling_Q
                         experience_samples = self.sampling_Q(pos=[0, 0], sampling_times=sampling_times)
                         # cal the action-value of state
-                        self.update_state_action_value_with_exp(experience_samples=experience_samples)
+                        self.update_state_action_value_with_exp(experience_samples=experience_samples, mode="MC")
+
+            elif agent_mode == "TD0":
+                if state_mode == 'V':
+                    # sampling_V
+                    experience_samples = self.sampling_V(pos=[0, 0], sampling_times=1)
+                    # cal the value of state
+                    self.update_state_value_with_exp(experience_samples=experience_samples, mode="TD0")
+                elif state_mode == 'Q':
+                    # sampling_Q
+                    experience_samples = self.sampling_Q(pos=[0, 0], sampling_times=1)
+                    # cal the action-value of state
+                    self.update_state_action_value_with_exp(experience_samples=experience_samples, mode="TD0")
+
             elif agent_mode == "DP":
                 if state_mode == 'V':
                     # cal the value of state
@@ -321,7 +354,6 @@ class Game_Starter:
                 elif state_mode == 'Q':
                     # cal the action-value of state
                     self.update_state_action_value()
-
             # update the policy according to the updated value of state
             self.update_policy(by=state_mode)
 
