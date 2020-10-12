@@ -217,7 +217,7 @@ class Game_Starter:
                         t_i, t_j = self.env.get_pos(i, j, action)
                         G = (1) * self.env.reward_table[t_i, t_j]
                         for a_secondary, action_prob in enumerate(self.agent.policy[t_i, t_j]):
-                            G += action_prob * self.env.action_value_table[t_i, t_j][a_secondary]
+                            G += self.env.discount * action_prob * self.env.action_value_table[t_i, t_j][a_secondary]
                         self.env.action_value_table[i,j][a_primary] = G
 
     def update_state_value_with_exp(self, experience_samples):
@@ -276,7 +276,7 @@ class Game_Starter:
                     argmax_actions = list(np.argwhere(state_values == np.max(state_values)).reshape(-1, ))  # there maybe more than one max value
 
                 elif by == 'Q':
-                    action_values = self.env.action_value_table[i,j]
+                    action_values = list(map(roundList, self.env.action_value_table[i,j]))
                     argmax_actions = list(np.argwhere(action_values == np.max(action_values)).reshape(-1, ))
 
                 # update the policy
