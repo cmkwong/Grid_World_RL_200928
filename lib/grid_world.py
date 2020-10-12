@@ -180,19 +180,21 @@ class Game_Starter:
                 t_i, t_j = self.env.get_pos(c_i, c_j, action)
 
                 # record the experience
-                states_actions_and_rewards.append([(c_i, c_j), action, self.env.reward_table[t_i, t_j]])
+                states_actions_and_rewards.append([(c_i, c_j), action, self.env.reward_table[c_i, c_j]])
 
-                if (t_i == 2 and t_j == 3) or (t_i == 3 and t_j == 3):
-                    states_actions_and_returns = []
-                    G = 0
-                    # calculate the return from rewards
-                    for s, a, r in reversed(states_actions_and_rewards):
-                        G = r + self.env.discount * G
-                        states_actions_and_returns.append([s, a, G])
-                    states_actions_and_returns.reverse()
+                # break if the last experience
+                if (c_i == 2 and c_j == 3) or (c_i == 3 and c_j == 3):
                     break
 
                 c_i, c_j = t_i, t_j
+
+            states_actions_and_returns = []
+            G = 0
+            # calculate the return from rewards
+            for s, a, r in reversed(states_actions_and_rewards):
+                states_actions_and_returns.append([s, a, G])
+                G = r + self.env.discount * G
+            states_actions_and_returns.reverse()
 
             # append the samples
             samples["reward"].append(states_actions_and_rewards)
@@ -279,7 +281,12 @@ class Game_Starter:
                 self.env.action_value_table[s[0], s[1]][a] = all_returns[s[0], s[1]][a]
 
         elif mode == "TD0":
-            pass
+            state_and_reward = experience_samples["reward"]
+            for exp in state_and_reward:
+                for t in range(len(exp) - 1):
+                    s, action, _ = exp[t]
+                    s2, action2, r2 = exp[t+1]
+                    self.env.action_value_table[s][ACTION_LABELS.index(action)] = self.env.action_value_table[s][ACTION_LABELS.index(action)] + self.agent.lr * (r2 + self.env.discount * self.env.action_value_table[s2][ACTION_LABELS.index(action2)] - self.env.action_value_table[s][ACTION_LABELS.index(action)])
 
     def update_policy(self, by='V'): # by='V' / 'Q'
         max_i, max_j = self.agent.policy.shape[0], self.agent.policy.shape[1]
@@ -338,12 +345,12 @@ class Game_Starter:
             elif agent_mode == "TD0":
                 if state_mode == 'V':
                     # sampling_V
-                    experience_samples = self.sampling_V(pos=[0, 0], sampling_times=1)
+                    experience_samples = self.sampling_V(pos=[0, 0], sampling_times=sampling_times)
                     # cal the value of state
                     self.update_state_value_with_exp(experience_samples=experience_samples, mode="TD0")
                 elif state_mode == 'Q':
                     # sampling_Q
-                    experience_samples = self.sampling_Q(pos=[0, 0], sampling_times=1)
+                    experience_samples = self.sampling_Q(pos=[0, 0], sampling_times=sampling_times)
                     # cal the action-value of state
                     self.update_state_action_value_with_exp(experience_samples=experience_samples, mode="TD0")
 
