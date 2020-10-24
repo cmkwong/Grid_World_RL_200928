@@ -66,11 +66,10 @@ class GridWorld:
         self.action_table[1, 3], self.reward_table[1, 3] = ['u', 'd', 'l'], self.step_cost
         self.action_table[2, 3], self.reward_table[2, 3] = [], -1
         self.action_table[3, 3], self.reward_table[3, 3] = [], 1
-        # action value
+        # action value table
         for i in range(self.rows):
             for j in range(self.cols):
                 self.action_value_table[i,j] = [0] * 4
-
         print("Grid Created!")
 
     def get_pos(self, i, j, action):
@@ -86,11 +85,60 @@ class GridWorld:
                 target_j = j - 1
         return target_i, target_j
 
+class Model:
+    def __init__(self, grid_shape, feature_type=0):
+        self.grid_shape = grid_shape
+        self.feature_type = feature_type
+        self.thetas = self.init_thetas()
+
+    def init_thetas(self):
+        thetas = None
+        if self.feature_type == 0:
+            thetas = (1 * np.random.randn(self.grid_shape[0] * self.grid_shape[1]) + 0).reshape(-1, 1)
+        elif self.feature_type == 1:
+            thetas = (1 * np.random.randn(self.grid_shape[0] * self.grid_shape[1] * 4) + 0).reshape(-1, 1)
+        elif self.feature_type == 2:
+            thetas = (1 * np.random.randn(4) + 0).reshape(-1, 1)
+        elif self.feature_type == 3:
+            thetas = (1 * np.random.randn(3) + 0).reshape(-1, 1)
+        return thetas
+
+    def sa2x(self, s, a=None):
+        x = None
+        if self.feature_type == 0:
+            x = np.zeros((self.grid_shape[0] * self.grid_shape[1], 1))
+            pos = s[0] * self.grid_shape[0] + s[1]
+            x[pos, 0] = 1
+        elif self.feature_type == 1:
+            x = np.zeros((self.grid_shape[0] * self.grid_shape[1], 4))
+            pos = s[0] * self.grid_shape[0] + s[1]
+            x[pos, a] = 1
+            x = x.reshape(-1,1)
+        elif self.feature_type == 2:
+            x = np.array([s[0]-1.5, s[1]-1.5, s[0]*s[1]-4.5, 1]).reshape(-1,1)
+        elif self.feature_type == 3:
+            x = np.array([s[0]+1, s[1]+1, 1]).reshape(-1,1)
+        return x
+
+    def predict(self, s, a=None):
+        x = None
+        if a is None:
+            x = self.sa2x(s)
+        elif a is not None:
+            x = self.sa2x(s, a)
+        return float(np.dot(self.thetas.T, x))
+
 class Agent:
-    def __init__(self, grid_shape, lr=0.1):
+    def __init__(self, grid_shape, model, lr=0.1):
         self.lr = lr
+        self.model = model
         self.policy = np.zeros((grid_shape[0], grid_shape[1]), dtype=object)
         self.init_policy()
+        # prepare for approximation method
+        self.value_thetas = (1 * np.random.randn(grid_shape[0] * grid_shape[1]) + 0).reshape(-1, 1)
+        self.action_value_thetas = (1 * np.random.randn(grid_shape[0] * grid_shape[1] * 4) + 0).reshape(-1, 1)
+        self.get_x_from_value = self.encode_value_state(grid_shape)
+        self.get_x_from_action_value = self.encode_action_value_state(grid_shape)
 
     def init_policy(self):
         """
@@ -109,6 +157,28 @@ class Agent:
         prob_dist = self.policy[position[0], position[1]]
         action_index = list(np.random.multinomial(1, prob_dist, size=1).reshape(-1, )).index(1)  # select the action based on distribution
         return ACTION_LABELS[action_index]
+
+    def encode_value_state(self, grid_shape):
+        dic = {}
+        pos = 0
+        for r in range(grid_shape[0]):
+            for c in range(grid_shape[1]):
+                dic[(r,c)] = np.zeros((grid_shape[0]*grid_shape[1], 1))
+                dic[(r,c)][pos,0] = 1
+                pos = pos + 1
+        return dic
+
+    def encode_action_value_state(self, grid_shape):
+        dic = {}
+        pos = 0
+        for r in range(grid_shape[0]):
+            for c in range(grid_shape[1]):
+                for a in range(4):
+                    action = ACTION_LABELS[a]
+                    dic[(r,c),action] = np.zeros((grid_shape[0] * grid_shape[1] * 4, 1))
+                    dic[(r,c),action][pos, 0] = 1
+                    pos = pos + 1
+        return dic
 
 class Game_Starter:
     def __init__(self, env, agent, target_reward, print_every, clean_history=True):
@@ -224,69 +294,111 @@ class Game_Starter:
                             G += self.env.discount * action_prob * self.env.action_value_table[t_i, t_j][a_secondary]
                         self.env.action_value_table[i,j][a_primary] = G
 
-    def update_state_value_with_exp(self, experience_samples, mode="MC"): # mode = "MC" / "TD0"
+    def update_state_value_with_exp_MC(self, experience_samples):
         """
         :params: experience_samples = [samples_reward, samples_return]
                         returns = [[ [s1, r1], [s2, r2], ...] ...]
                         rewards = [[ [s1, G1], [s2, G2], ...] ...]
         """
-        if mode == "MC":
-            state_and_return = experience_samples["return"]
-            all_returns = np.zeros((self.env.rows, self.env.cols), dtype=float)
-            all_counts = np.zeros((self.env.rows, self.env.cols), dtype=int)
-            updated_states = set()
-            for exp in range(len(state_and_return)):
-                for s, G in state_and_return[exp]:
-                    all_counts[s[0], s[1]] += 1
-                    all_returns[s[0], s[1]] = ((all_counts[s[0], s[1]] - 1) * all_returns[(s[0], s[1])] + G) * (1 / all_counts[s[0], s[1]])
-                    updated_states.add(s)
+        state_and_return = experience_samples["return"]
+        all_returns = np.zeros((self.env.rows, self.env.cols), dtype=float)
+        all_counts = np.zeros((self.env.rows, self.env.cols), dtype=int)
+        updated_states = set()
+        for exp in state_and_return:
+            for s, G in exp:
+                all_counts[s[0], s[1]] += 1
+                all_returns[s[0], s[1]] = ((all_counts[s[0], s[1]] - 1) * all_returns[(s[0], s[1])] + G) * (1 / all_counts[s[0], s[1]])
+                updated_states.add(s)
 
-            # update the new value of state
-            for s in updated_states:
-                self.env.value_table[s[0], s[1]] = all_returns[s[0], s[1]]
+        # update the new value of state
+        for s in updated_states:
+            self.env.value_table[s[0], s[1]] = all_returns[s[0], s[1]]
 
-        elif mode == "TD0":
-            state_and_reward = experience_samples["reward"]
-            for exp in state_and_reward:
-                for t in range(len(exp) - 1):
-                    s, _ = exp[t]
-                    s2, r = exp[t+1]
-                    self.env.value_table[s] = self.env.value_table[s] + self.agent.lr * (r + self.env.discount * self.env.value_table[s2] - self.env.value_table[s])
+    def update_state_value_with_exp_TD(self, experience_samples):
+        """
+        :params: experience_samples = [samples_reward, samples_return]
+                        returns = [[ [s1, r1], [s2, r2], ...] ...]
+                        rewards = [[ [s1, G1], [s2, G2], ...] ...]
+        """
+        state_and_reward = experience_samples["reward"]
+        for exp in state_and_reward:
+            for t in range(len(exp) - 1):
+                s, _ = exp[t]
+                s2, r = exp[t+1]
+                self.env.value_table[s] = self.env.value_table[s] + self.agent.lr * (r + self.env.discount * self.env.value_table[s2] - self.env.value_table[s])
 
+    def update_state_value_with_exp_AP(self, experience_samples):
+        """
+        :params: experience_samples = [samples_reward, samples_return]
+                        returns = [[ [s1, r1], [s2, r2], ...] ...]
+                        rewards = [[ [s1, G1], [s2, G2], ...] ...]
+        """
+        state_and_return = experience_samples["return"]
+        for exp in state_and_return:
+            for s, g in exp:
+                x = self.agent.model.sa2x(s)
+                predict_value = self.agent.model.predict(s)
+                self.agent.model.thetas = self.agent.model.thetas + self.agent.lr * (g - predict_value) * x
+                self.env.value_table[s] = predict_value
+                # x = self.agent.get_x_from_value[s]
+                # self.agent.value_thetas = self.agent.value_thetas + self.agent.lr * (g - np.dot(self.agent.value_thetas.T, x)) * x
+                # self.env.value_table[s] = float(np.dot(self.agent.value_thetas.T, x))
 
-    def update_state_action_value_with_exp(self, experience_samples, mode="MC"): # mode = "MC" / "TD0"
+    def update_state_action_value_with_exp_MC(self, experience_samples):
         """
         :params: experience_samples = [samples_reward, samples_return]
                         samples_reward = [[ [s1, a1, r1], [s2, a2, r2], ...] ...]
                         samples_return = [[ [s1, a1, G1], [s2, a2, G2], ...] ...] where a = action character
         """
-        if mode == "MC":
-            state_and_return = experience_samples["return"]
-            all_returns = np.zeros((self.env.rows, self.env.cols), dtype=object)
-            all_counts = np.zeros((self.env.rows, self.env.cols), dtype=object)
-            for i in range(self.env.rows):
-                for j in range(self.env.cols):
-                    all_returns[i,j] = [0] * 4
-                    all_counts[i,j] = [0] * 4
-            updated_state_actions = set()
+        state_and_return = experience_samples["return"]
+        all_returns = np.zeros((self.env.rows, self.env.cols), dtype=object)
+        all_counts = np.zeros((self.env.rows, self.env.cols), dtype=object)
+        for i in range(self.env.rows):
+            for j in range(self.env.cols):
+                all_returns[i,j] = [0] * 4
+                all_counts[i,j] = [0] * 4
+        updated_state_actions = set()
 
-            for exp in state_and_return:
-                for s, action, G in exp:
-                    a = ACTION_LABELS.index(action)
-                    all_counts[s[0], s[1]][a] += 1
-                    all_returns[s[0], s[1]][a] = ((all_counts[s[0], s[1]][a] - 1) * all_returns[(s[0], s[1])][a] + G) * (1 / all_counts[s[0], s[1]][a])
-                    updated_state_actions.add((s,a))
+        for exp in state_and_return:
+            for s, action, G in exp:
+                a = ACTION_LABELS.index(action)
+                all_counts[s[0], s[1]][a] += 1
+                all_returns[s[0], s[1]][a] = ((all_counts[s[0], s[1]][a] - 1) * all_returns[(s[0], s[1])][a] + G) * (1 / all_counts[s[0], s[1]][a])
+                updated_state_actions.add((s,a))
 
-            for s, a in updated_state_actions:
-                self.env.action_value_table[s[0], s[1]][a] = all_returns[s[0], s[1]][a]
+        for s, a in updated_state_actions:
+            self.env.action_value_table[s[0], s[1]][a] = all_returns[s[0], s[1]][a]
 
-        elif mode == "TD0":
-            state_and_reward = experience_samples["reward"]
-            for exp in state_and_reward:
-                for t in range(len(exp) - 1):
-                    s, action, _ = exp[t]
-                    s2, action2, r2 = exp[t+1]
-                    self.env.action_value_table[s][ACTION_LABELS.index(action)] = self.env.action_value_table[s][ACTION_LABELS.index(action)] + self.agent.lr * (r2 + self.env.discount * self.env.action_value_table[s2][ACTION_LABELS.index(action2)] - self.env.action_value_table[s][ACTION_LABELS.index(action)])
+    def update_state_action_value_with_exp_TD(self, experience_samples):
+        """
+        :params: experience_samples = [samples_reward, samples_return]
+                        samples_reward = [[ [s1, a1, r1], [s2, a2, r2], ...] ...]
+                        samples_return = [[ [s1, a1, G1], [s2, a2, G2], ...] ...] where a = action character
+        """
+        state_and_reward = experience_samples["reward"]
+        for exp in state_and_reward:
+            for t in range(len(exp) - 1):
+                s, action, _ = exp[t]
+                s2, action2, r2 = exp[t+1]
+                self.env.action_value_table[s][ACTION_LABELS.index(action)] = self.env.action_value_table[s][ACTION_LABELS.index(action)] + self.agent.lr * (r2 + self.env.discount * self.env.action_value_table[s2][ACTION_LABELS.index(action2)] - self.env.action_value_table[s][ACTION_LABELS.index(action)])
+
+    def update_state_action_value_with_exp_AP(self, experience_samples):
+        """
+        :params: experience_samples = [samples_reward, samples_return]
+                        samples_reward = [[ [s1, a1, r1], [s2, a2, r2], ...] ...]
+                        samples_return = [[ [s1, a1, G1], [s2, a2, G2], ...] ...] where a = action character
+        """
+        state_and_return = experience_samples["return"]
+        for exp in state_and_return:
+            for s, action, g in exp:
+                a = ACTION_LABELS.index(action)
+                x = self.agent.model.sa2x(s, a)
+                predict_value = self.agent.model.predict(s, a)
+                self.agent.model.thetas = self.agent.model.thetas + self.agent.lr * (g - predict_value) * x
+                self.env.action_value_table[s][ACTION_LABELS.index(action)] = predict_value
+                # x = self.agent.get_x_from_action_value[(s,action)]
+                # self.agent.action_value_thetas = self.agent.action_value_thetas + self.agent.lr * (g - np.dot(self.agent.action_value_thetas.T, x)) * x
+                # self.env.action_value_table[s][ACTION_LABELS.index(action)] = float(np.dot(self.agent.action_value_thetas.T, x))
 
     def update_policy(self, by='V'): # by='V' / 'Q'
         max_i, max_j = self.agent.policy.shape[0], self.agent.policy.shape[1]
@@ -329,38 +441,55 @@ class Game_Starter:
                 goal_count += 1
             play_count += 1
 
-            if agent_mode == "MC":
+            if agent_mode == "MC": # Monte Carlo
                 if state_mode == 'V':
                     # sampling_V
                     experience_samples = self.sampling_V(pos=[0, 0], sampling_times=sampling_times)
                     # cal the value of state
-                    self.update_state_value_with_exp(experience_samples=experience_samples, mode="MC")
+                    self.update_state_value_with_exp_MC(experience_samples=experience_samples)
                 elif state_mode == 'Q':
                     for _ in range(policy_update_times):
                         # sampling_Q
                         experience_samples = self.sampling_Q(pos=[0, 0], sampling_times=sampling_times)
                         # cal the action-value of state
-                        self.update_state_action_value_with_exp(experience_samples=experience_samples, mode="MC")
+                        self.update_state_action_value_with_exp_MC(experience_samples=experience_samples)
 
-            elif agent_mode == "TD0":
+            elif agent_mode == "TD0": # Temporal Difference Learning
                 if state_mode == 'V':
                     # sampling_V
                     experience_samples = self.sampling_V(pos=[0, 0], sampling_times=sampling_times)
                     # cal the value of state
-                    self.update_state_value_with_exp(experience_samples=experience_samples, mode="TD0")
+                    self.update_state_value_with_exp_TD(experience_samples=experience_samples)
                 elif state_mode == 'Q':
                     # sampling_Q
                     experience_samples = self.sampling_Q(pos=[0, 0], sampling_times=sampling_times)
                     # cal the action-value of state
-                    self.update_state_action_value_with_exp(experience_samples=experience_samples, mode="TD0")
+                    self.update_state_action_value_with_exp_TD(experience_samples=experience_samples)
 
-            elif agent_mode == "DP":
+            elif agent_mode == "AP": # Approximation Method
+                if state_mode == 'V':
+                    # calculate the approximated theta
+                    experience_samples = self.sampling_V(pos=[0, 0], sampling_times=sampling_times)
+                    self.update_state_value_with_exp_AP(experience_samples=experience_samples)
+                elif state_mode == 'Q':
+                    experience_samples = self.sampling_Q(pos=[0,0], sampling_times=sampling_times)
+                    self.update_state_action_value_with_exp_AP(experience_samples)
+
+            elif agent_mode == "TD0_AP": # Dynamic Programming Method
+                if state_mode == 'V':
+                    # calculate the approximated theta
+                    pass
+                elif state_mode == 'Q':
+                    pass
+
+            elif agent_mode == "DP": # Dynamic Programming Method
                 if state_mode == 'V':
                     # cal the value of state
                     self.update_state_value()
                 elif state_mode == 'Q':
                     # cal the action-value of state
                     self.update_state_action_value()
+
             # update the policy according to the updated value of state
             self.update_policy(by=state_mode)
 
