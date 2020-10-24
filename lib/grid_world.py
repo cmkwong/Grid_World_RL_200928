@@ -85,49 +85,6 @@ class GridWorld:
                 target_j = j - 1
         return target_i, target_j
 
-class Model:
-    def __init__(self, grid_shape, feature_type=0):
-        self.grid_shape = grid_shape
-        self.feature_type = feature_type
-        self.thetas = self.init_thetas()
-
-    def init_thetas(self):
-        thetas = None
-        if self.feature_type == 0:
-            thetas = (1 * np.random.randn(self.grid_shape[0] * self.grid_shape[1]) + 0).reshape(-1, 1)
-        elif self.feature_type == 1:
-            thetas = (1 * np.random.randn(self.grid_shape[0] * self.grid_shape[1] * 4) + 0).reshape(-1, 1)
-        elif self.feature_type == 2:
-            thetas = (1 * np.random.randn(4) + 0).reshape(-1, 1)
-        elif self.feature_type == 3:
-            thetas = (1 * np.random.randn(3) + 0).reshape(-1, 1)
-        return thetas
-
-    def sa2x(self, s, a=None):
-        x = None
-        if self.feature_type == 0:
-            x = np.zeros((self.grid_shape[0] * self.grid_shape[1], 1))
-            pos = s[0] * self.grid_shape[0] + s[1]
-            x[pos, 0] = 1
-        elif self.feature_type == 1:
-            x = np.zeros((self.grid_shape[0] * self.grid_shape[1], 4))
-            pos = s[0] * self.grid_shape[0] + s[1]
-            x[pos, a] = 1
-            x = x.reshape(-1,1)
-        elif self.feature_type == 2:
-            x = np.array([s[0]-1.5, s[1]-1.5, s[0]*s[1]-4.5, 1]).reshape(-1,1)
-        elif self.feature_type == 3:
-            x = np.array([s[0]+1, s[1]+1, 1]).reshape(-1,1)
-        return x
-
-    def predict(self, s, a=None):
-        x = None
-        if a is None:
-            x = self.sa2x(s)
-        elif a is not None:
-            x = self.sa2x(s, a)
-        return float(np.dot(self.thetas.T, x))
-
 class Agent:
     def __init__(self, grid_shape, model, lr=0.1):
         self.lr = lr
@@ -344,6 +301,23 @@ class Game_Starter:
                 # self.agent.value_thetas = self.agent.value_thetas + self.agent.lr * (g - np.dot(self.agent.value_thetas.T, x)) * x
                 # self.env.value_table[s] = float(np.dot(self.agent.value_thetas.T, x))
 
+    def update_state_value_with_exp_AP_TD0(self, experience_samples):
+        """
+        :params: experience_samples = [samples_reward, samples_return]
+                        returns = [[ [s1, r1], [s2, r2], ...] ...]
+                        rewards = [[ [s1, G1], [s2, G2], ...] ...]
+        """
+        state_and_reward = experience_samples["reward"]
+        for exp in state_and_reward:
+            for t in range(len(exp) - 1):
+                s, _ = exp[t]
+                s2, r2 = exp[t + 1]
+                x = self.agent.model.sa2x(s)
+                target = r2 + self.env.discount * (self.agent.model.predict(s2))
+                prediction = self.agent.model.predict(s)
+                self.agent.model.thetas = self.agent.model.thetas + self.agent.lr * (target - prediction) * x
+                self.env.value_table[s] = prediction
+
     def update_state_action_value_with_exp_MC(self, experience_samples):
         """
         :params: experience_samples = [samples_reward, samples_return]
@@ -399,6 +373,23 @@ class Game_Starter:
                 # x = self.agent.get_x_from_action_value[(s,action)]
                 # self.agent.action_value_thetas = self.agent.action_value_thetas + self.agent.lr * (g - np.dot(self.agent.action_value_thetas.T, x)) * x
                 # self.env.action_value_table[s][ACTION_LABELS.index(action)] = float(np.dot(self.agent.action_value_thetas.T, x))
+
+    def update_state_action_value_with_exp_AP_TD0(self, experience_samples):
+        """
+        :params: experience_samples = [samples_reward, samples_return]
+                        samples_reward = [[ [s1, a1, r1], [s2, a2, r2], ...] ...]
+                        samples_return = [[ [s1, a1, G1], [s2, a2, G2], ...] ...] where a = action character
+        """
+        state_and_reward = experience_samples["reward"]
+        for exp in state_and_reward:
+            for t in range(len(exp) - 1):
+                s, action, _ = exp[t]
+                s2, action2, r2 = exp[t + 1]
+                x = self.agent.model.sa2x(s, ACTION_LABELS.index(action))
+                target = r2 + self.env.discount * (self.agent.model.predict(s2, ACTION_LABELS.index(action2)))
+                prediction = self.agent.model.predict(s, ACTION_LABELS.index(action))
+                self.agent.model.thetas = self.agent.model.thetas + self.agent.lr * (target - prediction) * x
+                self.env.action_value_table[s][ACTION_LABELS.index(action)] = prediction
 
     def update_policy(self, by='V'): # by='V' / 'Q'
         max_i, max_j = self.agent.policy.shape[0], self.agent.policy.shape[1]
@@ -475,12 +466,14 @@ class Game_Starter:
                     experience_samples = self.sampling_Q(pos=[0,0], sampling_times=sampling_times)
                     self.update_state_action_value_with_exp_AP(experience_samples)
 
-            elif agent_mode == "TD0_AP": # Dynamic Programming Method
+            elif agent_mode == "AP_TD0": # Dynamic Programming Method
                 if state_mode == 'V':
-                    # calculate the approximated theta
-                    pass
+                    experience_samples = self.sampling_V(pos=[0, 0], sampling_times=sampling_times)
+                    # cal the value of state
+                    self.update_state_value_with_exp_AP_TD0(experience_samples=experience_samples)
                 elif state_mode == 'Q':
-                    pass
+                    experience_samples = self.sampling_Q(pos=[0,0], sampling_times=sampling_times)
+                    self.update_state_action_value_with_exp_AP_TD0(experience_samples=experience_samples)
 
             elif agent_mode == "DP": # Dynamic Programming Method
                 if state_mode == 'V':
