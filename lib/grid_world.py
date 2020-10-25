@@ -313,7 +313,10 @@ class Game_Starter:
                 s, _ = exp[t]
                 s2, r2 = exp[t + 1]
                 x = self.agent.model.sa2x(s)
-                target = r2 + self.env.discount * (self.agent.model.predict(s2))
+                if s2 == (3,3) or s2 == (2,3):
+                    target = r2
+                else:
+                    target = r2 + self.env.discount * (self.agent.model.predict(s2))
                 prediction = self.agent.model.predict(s)
                 self.agent.model.thetas = self.agent.model.thetas + self.agent.lr * (target - prediction) * x
                 self.env.value_table[s] = prediction
@@ -367,9 +370,9 @@ class Game_Starter:
             for s, action, g in exp:
                 a = ACTION_LABELS.index(action)
                 x = self.agent.model.sa2x(s, a)
-                predict_value = self.agent.model.predict(s, a)
-                self.agent.model.thetas = self.agent.model.thetas + self.agent.lr * (g - predict_value) * x
-                self.env.action_value_table[s][ACTION_LABELS.index(action)] = predict_value
+                prediction = self.agent.model.predict(s, a)
+                self.agent.model.thetas = self.agent.model.thetas + self.agent.lr * (g - prediction) * x
+                self.env.action_value_table[s][ACTION_LABELS.index(action)] = prediction
                 # x = self.agent.get_x_from_action_value[(s,action)]
                 # self.agent.action_value_thetas = self.agent.action_value_thetas + self.agent.lr * (g - np.dot(self.agent.action_value_thetas.T, x)) * x
                 # self.env.action_value_table[s][ACTION_LABELS.index(action)] = float(np.dot(self.agent.action_value_thetas.T, x))
@@ -386,7 +389,10 @@ class Game_Starter:
                 s, action, _ = exp[t]
                 s2, action2, r2 = exp[t + 1]
                 x = self.agent.model.sa2x(s, ACTION_LABELS.index(action))
-                target = r2 + self.env.discount * (self.agent.model.predict(s2, ACTION_LABELS.index(action2)))
+                if s2 == (3,3) or s2 == (2,3):
+                    target = r2
+                else:
+                    target = r2 + self.env.discount * (self.agent.model.predict(s2, ACTION_LABELS.index(action2)))
                 prediction = self.agent.model.predict(s, ACTION_LABELS.index(action))
                 self.agent.model.thetas = self.agent.model.thetas + self.agent.lr * (target - prediction) * x
                 self.env.action_value_table[s][ACTION_LABELS.index(action)] = prediction
@@ -483,6 +489,9 @@ class Game_Starter:
                     # cal the action-value of state
                     self.update_state_action_value()
 
+            else:
+                print("Wrong agent mode")
+                return False
             # update the policy according to the updated value of state
             self.update_policy(by=state_mode)
 
